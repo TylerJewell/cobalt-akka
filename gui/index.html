@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>cobalt queue item</title>
+<style>
+    /*
+        Colours and layout below are copied verbatim from cobalt's own
+        web/src/app.css (root variables) and
+        web/src/components/queue/{ProcessingQueueItem,ProgressBar}.svelte
+        <style> blocks, per RENDERING.md R3 — this screen is the original's
+        own queue-item card, not a redesign. What is NOT reused is the rest
+        of that app (i18n, dialogs, OPFS storage, ffmpeg workers): this
+        port's slice ends at scheduling and per-source action planning
+        (SPEC-001 §1), so there is nothing behind "download"/"retry" here
+        for those buttons to do, and they are left out rather than faked.
+    */
+    :root {
+        --gray: #75757e;
+        --medium-red: #ce3030;
+        --blue: #2f8af9;
+        --button: #f4f4f4;
+        --button-elevated: #e3e3e3;
+        --text: #1a1a1a;
+        --bg: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+        :root {
+            --gray: #818181;
+            --blue: #2a7ce1;
+            --button: #191919;
+            --button-elevated: #282828;
+            --text: #f4f4f4;
+            --bg: #101010;
+        }
+    }
+    body {
+        font-family: system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 24px;
+        max-width: 420px;
+    }
+    .processing-item {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-start;
+        align-items: center;
+        position: relative;
+        width: 100%;
+        padding: 8px 0;
+        gap: 8px;
+        border-bottom: 1.5px var(--button-elevated) solid;
+    }
+    .processing-info {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        font-size: 13px;
+        gap: 4px;
+        font-weight: 500;
+    }
+    .file-title {
+        display: flex;
+        flex-direction: row;
+        gap: 4px;
+        line-break: anywhere;
+    }
+    .filename {
+        overflow: hidden;
+        white-space: pre;
+        text-overflow: ellipsis;
+    }
+    .progress-holder {
+        display: flex;
+        flex-direction: row;
+        gap: 2px;
+    }
+    .file-progress {
+        width: 100%;
+        background-color: var(--button-elevated);
+    }
+    .file-progress, .file-progress .progress {
+        height: 6px;
+        border-radius: 10px;
+        transition: width 0.1s;
+    }
+    .file-progress .progress {
+        background-color: var(--blue);
+    }
+    .file-status {
+        font-size: 12px;
+        color: var(--gray);
+        line-break: anywhere;
+        display: flex;
+        align-items: center;
+    }
+    .file-status.error { color: var(--medium-red); }
+    .status-text { line-break: normal; }
+</style>
+</head>
+<body>
+    <div id="item" class="processing-item" role="listitem">
+        <div class="processing-info">
+            <div class="file-title">
+                <span class="filename" id="filename">waiting for an item…</span>
+            </div>
+            <div class="progress-holder" id="progress-holder"></div>
+            <div class="file-status" id="status">
+                <div class="status-text" id="status-text"></div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    // R1/R4: pushed over SSE from GET /items/{itemId}/stream, not polled from
+    // this page — see io.akka.cobalt.api.QueueStreamEndpoint. The endpoint
+    // itself re-reads the entity on an internal tick and only emits a frame
+    // when the payload actually changed, the same pattern already used by
+    // this harness's other streamed ports (e.g. docmost-akka's
+    // HistoryStreamEndpoint), so an idle item produces no traffic beyond
+    // the stream's own keep-alives.
+    const params = new URLSearchParams(location.search);
+    const itemId = params.get("item") || "demo";
+
+    const filenameEl = document.getElementById("filename");
+    const holderEl = document.getElementById("progress-holder");
+    const statusEl = document.getElementById("status");
+    const statusTextEl = document.getElementById("status-text");
+
+    function render(item) {
+        filenameEl.textContent = item.filename || item.id;
+        statusEl.className = "file-status " + item.state;
+        statusTextEl.textContent = item.state;
+
+        holderEl.innerHTML = "";
+        if (item.state === "running") {
+            for (const worker of item.pipeline) {
+                const bar = document.createElement("div");
+                bar.className = "file-progress";
+                const fill = document.createElement("div");
+                fill.className = "progress";
+                fill.style.width = Math.round((item.workerProgress[worker.workerId] || 0) * 100) + "%";
+                bar.appendChild(fill);
+                holderEl.appendChild(bar);
+            }
+        }
+    }
+
+    const source = new EventSource(`/items/${encodeURIComponent(itemId)}/stream`);
+    source.onmessage = (event) => render(JSON.parse(event.data));
+</script>
+</body>
+</html>
